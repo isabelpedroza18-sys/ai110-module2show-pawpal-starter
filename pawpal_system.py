@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional, List
+from datetime import datetime, timedelta
 
 
 @dataclass
@@ -39,10 +40,19 @@ class ScheduledTask:
     task: Task
     time_slot: str  # e.g., "09:00 AM", "02:30 PM"
     day: str  # e.g., "Monday", "Tuesday"
+    start_time: Optional[datetime] = None  # Actual datetime for conflict detection
+    end_time: Optional[datetime] = None    # End time for duration tracking
 
     def get_scheduled_info(self) -> str:
         """Return formatted scheduled task information."""
         return f"{self.task.name} scheduled for {self.day} at {self.time_slot}"
+    
+    def has_conflict_with(self, other: 'ScheduledTask') -> bool:
+        """Check if this task overlaps with another on the same day."""
+        if self.day != other.day or self.start_time is None or other.start_time is None:
+            return False
+        # Tasks conflict if one starts before the other ends
+        return self.start_time < other.end_time and other.start_time < self.end_time
 
 
 @dataclass
@@ -51,19 +61,26 @@ class Pet:
     name: str
     breed: str
     age: int
-    special_needs: List[str]
+    special_needs: set[str]
     owner: Optional['Owner'] = None
     tasks: List['Task'] = field(default_factory=list)
+    
+    def __post_init__(self):
+        """Normalize special_needs to lowercase set for consistent case-insensitive lookups."""
+        if isinstance(self.special_needs, list):
+            self.special_needs = {need.lower() for need in self.special_needs}
+        else:
+            self.special_needs = {need.lower() for need in self.special_needs}
 
     def get_info(self) -> str:
         """Return formatted pet information."""
         owner_name = self.owner.name if self.owner else "Unowned"
-        special_needs_str = ", ".join(self.special_needs) if self.special_needs else "None"
+        special_needs_str = ", ".join(sorted(self.special_needs)) if self.special_needs else "None"
         return f"Pet: {self.name} | Breed: {self.breed} | Age: {self.age} | Owner: {owner_name} | Special Needs: {special_needs_str}"
 
     def has_special_need(self, need: str) -> bool:
-        """Check if pet has a specific special need."""
-        return need.lower() in [n.lower() for n in self.special_needs]
+        """Check if pet has a specific special need (O(1) set lookup)."""
+        return need.lower() in self.special_needs
 
     def get_owner(self) -> Optional['Owner']:
         """Return the owner of this pet."""
@@ -124,24 +141,21 @@ class Owner:
 
     def get_all_pets_tasks(self) -> List[Task]:
         """Return all tasks for all pets owned by this owner."""
-        all_tasks = []
-        for pet in self.pets:
-            if hasattr(pet, 'tasks'):
-                all_tasks.extend(pet.tasks)
-        return all_tasks
+        return [task for pet in self.pets for task in pet.tasks]
 
     def get_available_hours(self, day: str) -> float:
-        """Get available hours for a specific day."""
-        return self.available_schedule.get(day.title(), 0.0)
+        """Get available hours for a specific day (using lowercase normalized key)."""
+        return self.available_schedule.get(day.lower(), 0.0)
 
     def set_available_hours(self, day: str, hours: float) -> None:
-        """Set available hours for a specific day."""
-        days_of_the_week =['monday', 'tuesday','wednesday', 'thursday','friday','saturday','sunday']
-        if day.lower() not in days_of_the_week:
+        """Set available hours for a specific day (using lowercase normalized key)."""
+        days_of_the_week = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+        day_lower = day.lower()
+        if day_lower not in days_of_the_week:
             print("Not a valid weekday. Try again")
         else:
             if hours > 0 and hours <= 24:
-                self.available_schedule[day.title()]= hours
+                self.available_schedule[day_lower] = hours
             else:
                 print("Invalid hours. Must be between 0 and 24. Try again")
         
@@ -159,16 +173,20 @@ class Scheduler:
         self.pets: List[Pet] = pets
         self.tasks: List[Task] = []
         self.scheduled_tasks: List[ScheduledTask] = []
+        self._sorted_tasks_cache: Optional[List[Task]] = None
 
     def add_task(self, task: Task) -> None:
-        """Add a task to the scheduler's task list."""
-        self.tasks.append(task)
+        """Add a task to the scheduler's task list (preventing duplicates)."""
+        if task not in self.tasks:
+            self.tasks.append(task)
+            self._sorted_tasks_cache = None  # Invalidate cache
 
     def remove_task(self, task_name: str) -> None:
         """Remove a task by name from the scheduler's task list."""
         task_to_remove = next((t for t in self.tasks if t.name == task_name), None)
         if task_to_remove:
             self.tasks.remove(task_to_remove)
+            self._sorted_tasks_cache = None  # Invalidate cache
         else:
             print(f"Task '{task_name}' not found.")
 
@@ -176,39 +194,43 @@ class Scheduler:
         """Generate an optimized schedule for a specific day with time slots."""
         self.scheduled_tasks = []
         
+        # Calculate total duration needed once (for validation and reuse)
+        total_duration_needed = self.get_total_duration_needed()
+        
         # Validate constraints and feasibility
         if not self._validate_constraints():
             print("Warning: Some required tasks or pet special needs are not addressed.")
         
-        if not self._check_feasibility(day):
+        available_minutes = self.owner.get_available_hours(day) * 60
+        if total_duration_needed > available_minutes:
             print(f"Warning: Not all tasks fit in the available time for {day}.")
         
         # Sort tasks by priority
         sorted_tasks = self._sort_tasks_by_priority()
         
-        # Get available hours for the day and convert to minutes
-        available_minutes = self.owner.get_available_hours(day) * 60
-        current_time_minutes = 8 * 60  # Start at 08:00 AM
+        # Set up time tracking with datetime for cleaner formatting
+        current_time = datetime.strptime("08:00", "%H:%M")  # Start at 08:00 AM
         time_used = 0
         
         # Assign time slots to tasks in priority order
         for task in sorted_tasks:
             if time_used + task.duration_minutes <= available_minutes:
-                # Convert minutes to HH:MM format
-                hours = current_time_minutes // 60
-                minutes = current_time_minutes % 60
-                am_pm = "AM" if hours < 12 else "PM"
-                display_hours = hours if hours <= 12 else hours - 12
-                if display_hours == 0:
-                    display_hours = 12
-                time_slot = f"{display_hours:02d}:{minutes:02d} {am_pm}"
+                # Format time using strftime for cleaner code
+                time_slot = current_time.strftime("%I:%M %p")
+                end_time = current_time + timedelta(minutes=task.duration_minutes)
                 
-                scheduled_task = ScheduledTask(task=task, time_slot=time_slot, day=day.title())
+                scheduled_task = ScheduledTask(
+                    task=task, 
+                    time_slot=time_slot, 
+                    day=day.title(),
+                    start_time=current_time.replace(year=2024),  # Use consistent year for comparison
+                    end_time=end_time.replace(year=2024)
+                )
                 self.scheduled_tasks.append(scheduled_task)
                 
                 # Update tracking
                 time_used += task.duration_minutes
-                current_time_minutes += task.duration_minutes
+                current_time += timedelta(minutes=task.duration_minutes)
         
         return self.scheduled_tasks
 
@@ -251,7 +273,9 @@ class Scheduler:
 
     def _sort_tasks_by_priority(self) -> List[Task]:
         """Sort tasks by priority (highest first). Private helper method."""
-        return sorted(self.tasks, key = lambda t: t.priority, reverse=True)
+        if self._sorted_tasks_cache is None:
+            self._sorted_tasks_cache = sorted(self.tasks, key=lambda t: t.priority, reverse=True)
+        return self._sorted_tasks_cache
 
     def _validate_constraints(self) -> bool:
         """Validate that all required tasks and pet special needs are addressed."""
@@ -260,16 +284,20 @@ class Scheduler:
         if not required_tasks:
             return True  # No required tasks, so valid
         
-        # For each pet, check if special needs are addressed by tasks
+        # For each pet, build a combined lowercase string for efficient substring matching
         for pet in self.pets:
+            if not pet.special_needs:
+                continue  # No special needs to validate
+            
+            # Create a single lowercase string combining all task content for efficient matching
+            task_content = " ".join(
+                f"{task.name} {task.description}".lower() 
+                for task in pet.tasks
+            )
+            
+            # Check each special need with simple substring matching (very fast)
             for special_need in pet.special_needs:
-                # Check if there's a task addressing this special need
-                has_task_for_need = any(
-                    special_need.lower() in t.name.lower() or 
-                    special_need.lower() in t.description.lower()
-                    for t in pet.tasks
-                )
-                if not has_task_for_need:
+                if special_need not in task_content:
                     print(f"Warning: Pet '{pet.name}' has special need '{special_need}' but no task addresses it.")
                     return False
         
@@ -280,8 +308,86 @@ class Scheduler:
         available_minutes = self.owner.get_available_hours(day) * 60
         total_duration_needed = self.get_total_duration_needed()
         
-        if total_duration_needed > available_minutes:
-            print(f"Not feasible: {total_duration_needed} minutes needed but only {available_minutes} minutes available on {day}.")
-            return False
+        if total_duration_needed <= available_minutes:
+            return True
         
-        return True
+        print(f"Not feasible: {total_duration_needed} minutes needed but only {available_minutes} minutes available on {day}.")
+        return False
+
+    def sort_scheduled_tasks_by_time(self) -> List[ScheduledTask]:
+        """Sort all scheduled tasks chronologically by start time."""
+        if not self.scheduled_tasks:
+            return []
+        return sorted(self.scheduled_tasks, key=lambda st: st.start_time if st.start_time else datetime.max)
+
+    def filter_by_pet(self, pet_name: str) -> List[ScheduledTask]:
+        """Get all scheduled tasks for a specific pet."""
+        return [st for st in self.scheduled_tasks if st.task.pet and st.task.pet.name == pet_name]
+
+    def filter_by_status(self, is_completed: bool) -> List[ScheduledTask]:
+        """Get scheduled tasks filtered by completion status."""
+        return [st for st in self.scheduled_tasks if st.task.is_completed == is_completed]
+
+    def expand_recurring_tasks(self, base_day: str, num_days: int = 7) -> List[ScheduledTask]:
+        """Expand recurring tasks across multiple days based on frequency."""
+        expanded_schedule = []
+        days_of_week = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+        base_day_lower = base_day.lower()
+        start_index = days_of_week.index(base_day_lower) if base_day_lower in days_of_week else 0
+        
+        for task in self.tasks:
+            # Add initial scheduled task
+            matching_scheduled = [st for st in self.scheduled_tasks if st.task == task]
+            if matching_scheduled:
+                expanded_schedule.extend(matching_scheduled)
+            
+            # Expand recurring tasks
+            if task.frequency == "daily":
+                for day_offset in range(1, min(num_days, 7)):
+                    next_day_index = (start_index + day_offset) % 7
+                    next_day = days_of_week[next_day_index].title()
+                    # Create duplicate with new day
+                    if matching_scheduled:
+                        original = matching_scheduled[0]
+                        expanded_schedule.append(ScheduledTask(
+                            task=task,
+                            time_slot=original.time_slot,
+                            day=next_day,
+                            start_time=original.start_time,
+                            end_time=original.end_time
+                        ))
+            elif task.frequency == "twice daily":
+                if matching_scheduled:
+                    original = matching_scheduled[0]
+                    # Add a second time slot for the same day (afternoon)
+                    afternoon_time = original.start_time + timedelta(hours=6) if original.start_time else None
+                    if afternoon_time:
+                        expanded_schedule.append(ScheduledTask(
+                            task=task,
+                            time_slot=afternoon_time.strftime("%I:%M %p"),
+                            day=original.day,
+                            start_time=afternoon_time,
+                            end_time=afternoon_time + timedelta(minutes=task.duration_minutes)
+                        ))
+            elif task.frequency == "weekly":
+                # Recur once per week for num_days
+                if num_days >= 7 and matching_scheduled:
+                    original = matching_scheduled[0]
+                    expanded_schedule.append(ScheduledTask(
+                        task=task,
+                        time_slot=original.time_slot,
+                        day=original.day,
+                        start_time=original.start_time,
+                        end_time=original.end_time
+                    ))
+        
+        return expanded_schedule
+
+    def detect_conflicts(self) -> List[tuple[ScheduledTask, ScheduledTask]]:
+        """Identify overlapping scheduled tasks that create conflicts."""
+        conflicts = []
+        for i, task1 in enumerate(self.scheduled_tasks):
+            for task2 in self.scheduled_tasks[i + 1:]:
+                if task1.has_conflict_with(task2):
+                    conflicts.append((task1, task2))
+        return conflicts
