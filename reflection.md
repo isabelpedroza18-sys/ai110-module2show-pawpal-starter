@@ -4,8 +4,8 @@
 
 **a. Initial design**
 
-- Briefly describe your initial UML design.
-- What classes did you include, and what responsibilities did you assign to each?
+- Briefly describe your initial UML design. There will be four classes. The classes will be Owner, Pet, Task, and Scheduler. The Owner class will include attributes name: str, available_schedule: dict[str,float], preferences: list[str], and pets: list[Pet]. The Pet class will have the attriibutes name: str, breed:str, age: int, and special_needs: list[str], owner: Owner. The Task class will have attributes name: str, task_type: str, duration_minutes: int, priority: int, required: bool.
+- What classes did you include, and what responsibilities did you assign to each?The Owner class will be in charge of adding, removing pets, assigning and getting the available schedule, and getting the list of pets owned by the owner.
 
 **b. Design changes**
 
