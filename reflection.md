@@ -4,13 +4,14 @@
 
 **a. Initial design**
 
-- Briefly describe your initial UML design. There will be four classes. The classes will be Owner, Pet, Task, and Scheduler. The Owner class will include attributes name: str, available_schedule: dict[str,float], preferences: list[str], and pets: list[Pet]. The Pet class will have the attriibutes name: str, breed:str, age: int, and special_needs: list[str], owner: Owner. The Task class will have attributes name: str, task_type: str, duration_minutes: int, priority: int, required: bool.
-- What classes did you include, and what responsibilities did you assign to each?The Owner class will be in charge of adding, removing pets, assigning and getting the available schedule, and getting the list of pets owned by the owner.
+- Briefly describe your initial UML design. There will be four classes. The classes will be Owner, Pet, Task, and Scheduler. The Owner class will include attributes name: str, available_schedule: dict[str,float], preferences: list[str], and pets: list[Pet]. The Pet class will have the attriibutes name: str, breed:str, age: int, and special_needs: list[str], owner: Owner. The Task class will have attributes name: str, task_type: str, duration_minutes: int, priority: int, required: bool. The Scheduler class will have attributes owner:Owner, pet: Pet, tasks: list[Task].
+- What classes did you include, and what responsibilities did you assign to each?The Owner class will be in charge of adding, removing, printing pets list owned by that owner, assigning and getting the available schedule, setting preferences. Task will be in charge of getting details of each task and checking if it is high priority. The Scheduler will be assigned the responsibility of adding tasks, removing tasks, generating schedule, based on priority and available schedule.
 
 **b. Design changes**
 
-- Did your design change during implementation?
+- Did your design change during implementation? 
 - If yes, describe at least one change and why you made it.
+There are a few logic changes made to the classes. For example, the Scheduler class now takes in a list of pets, since an owner might have more than one pet and would need to schedule tasks for those pets.
 
 ---
 
