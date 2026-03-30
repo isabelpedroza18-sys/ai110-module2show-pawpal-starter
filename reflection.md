@@ -65,7 +65,7 @@ There are a few logic changes made to the classes. For example, the Scheduler cl
 
 **b. What you would improve**
 
-- If you had another iteration, what would you improve or redesign? I would like to test the code more to verify it can cover unexpected input.
+- If you had another iteration, what would you improve or redesign? I would like to test the code more to verify it can cover unexpected input. I would like to beautify the webpage view of the app.
 
 **c. Key takeaway**
 
